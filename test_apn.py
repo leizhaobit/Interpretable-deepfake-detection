@@ -13,7 +13,8 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import random
 sys.path.append('.')  # noqa: E402
-from model import RACNN
+#from model import RACNN
+from model_vis import RACNN
 from my_loader import my_dataloader
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
@@ -32,13 +33,15 @@ def random_sample(dataloader):
 
 def save_img(x, path, annotation=''):
     fig = plt.gcf()  # generate outputs
-    plt.imshow(my_dataloader.tensor_to_img(x[0]), aspect='equal'), plt.axis('off'), fig.set_size_inches(448/100.0/3.0, 448/100.0/3.0)
+    img = my_dataloader.tensor_to_img(x[0])
+    img = img[:, :, ::-1]
+    plt.imshow(img, aspect='equal'), plt.axis('off'), fig.set_size_inches(448/100.0/3.0, 448/100.0/3.0)
     plt.gca().xaxis.set_major_locator(plt.NullLocator()), plt.gca().yaxis.set_major_locator(plt.NullLocator()), plt.subplots_adjust(top=1, bottom=0, left=0, right=1, hspace=0, wspace=0), plt.margins(0, 0)
     plt.text(0, 0, annotation, color='white', size=4, ha="left", va="top", bbox=dict(boxstyle="square", ec='black', fc='black'))
     plt.savefig(path, dpi=300, pad_inches=0)    # visualize masked image
 
 
-def run(sample, pretrained_backbone=None):
+def run(sample, pretrained_backbone=None, seed=0):
     net = RACNN(num_classes=1).cuda()
     if pretrained_backbone:  # Using pretrained backbone for apn pretraining
         state_dict = torch.load(pretrained_backbone).state_dict()
@@ -51,7 +54,7 @@ def run(sample, pretrained_backbone=None):
     params = list(net.apn1.parameters()) + list(net.apn2.parameters())
     optimizer = optim.SGD(params, lr=0.001, momentum=0.9)
 
-    trainset = my_dataloader('/home/zhaolei2/project/xception/datasets/ff--c23', split='train')
+    trainset = my_dataloader('/home/zhaolei2/project/xception/datasets/ff--c23', split='train', seed=seed)
     trainloader = DataLoader(trainset, batch_size=8, shuffle=True, collate_fn=trainset.my_collate)
 
     net.mode("pretrain_apn")
@@ -94,11 +97,14 @@ def clean(path='build/.cache/'):
 if __name__ == "__main__":
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     clean()
-    testset = my_dataloader('/home/zhaolei2/project/xception/datasets/ff--c23', split='test')
-    testloader = DataLoader(testset, batch_size=8, shuffle=False, collate_fn=testset.my_collate)
+    testset = my_dataloader('/home/zhaolei2/project/xception/datasets/img_test4', split='test')
+    testloader = DataLoader(testset, batch_size=16, shuffle=False, collate_fn=testset.my_collate)
     sample = random_sample(testloader)
     sample = Variable(sample).cuda()
     for idx,sampl in enumerate(sample):
-        run(sampl, pretrained_backbone='/home/zhaolei2/project/xception/paper/build/mobilenet_v2_ff.pt')
+        run(sampl, pretrained_backbone='/home/zhaolei2/project/xception/paper/build/mobilenet_v2_ff.pt', seed=(idx+1))
         build_gif(pattern='@2x', gif_name='pretrain_apn_ffc23_'+str(idx))
         build_gif(pattern='@4x', gif_name='pretrain_apn_ffc23_'+str(idx))
+        #sampl = sampl.unsqueeze(0)
+        #save_img(sampl, path=f'build/img_{idx}.jpg', annotation=f'ori')
+        print(idx)

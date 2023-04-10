@@ -7,7 +7,7 @@ import torchvision.transforms as transforms
 import random
 
 class my_dataloader(data.Dataset):
-    def __init__(self, root, split='train', transform=None):
+    def __init__(self, root, split='train', seed=0, transform=None):
         std = 1. / 255.
         means = [109.97 / 255., 127.34 / 255., 123.88 / 255.]
         # 开始获取图像路径和对应标签
@@ -32,9 +32,9 @@ class my_dataloader(data.Dataset):
                 self._imgpath.append(os.path.join(subdir, file))
                 self._imglabel.append(1)
             break
-        random.seed(0)
+        random.seed(seed)
         random.shuffle(self._imgpath)
-        random.seed(0)
+        random.seed(seed)
         random.shuffle(self._imglabel)
 
         # 调整图像大小，归一化

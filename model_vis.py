@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from torchvision.models import mobilenet
+import numpy as np
 
 
 class AttentionCropFunction(torch.autograd.Function):
@@ -14,14 +15,16 @@ class AttentionCropFunction(torch.autograd.Function):
         unit = torch.stack([torch.arange(0, in_size)] * in_size)
         x = torch.stack([unit.t()] * 3)
         y = torch.stack([unit] * 3)
-        if isinstance(images, torch.FloatTensor):
-            x, y = x, y
+        if isinstance(images, torch.cuda.FloatTensor):
+            x, y = x.cuda(), y.cuda()
 
         in_size = images.size()[2]
         ret = []
         for i in range(images.size(0)):
             tx, ty, tl = locs[i][0], locs[i][1], locs[i][2]
+            # modify1: ori:tl = tl if tl > (in_size/3) else in_size/3
             tl = tl if tl > (in_size/3) else in_size/3
+            tl = tl if tl < (in_size*2/3) else in_size*2/3
             tx = tx if tx > tl else tl
             tx = tx if tx < in_size-tl else in_size-tl
             ty = ty if ty > tl else tl
@@ -47,9 +50,12 @@ class AttentionCropFunction(torch.autograd.Function):
     @staticmethod
     def backward(self, grad_output):
         images, ret_tensor, locs = self.saved_variables[0], self.saved_variables[1], self.saved_variables[2]
+
         tmp_x, tmp_y, tmp_l = locs[:, 0], locs[:, 1], locs[:, 2]
-        MAX = torch.ones([8]) * 224
-        MIN = torch.zeros([8])
+        MAX = torch.ones([grad_output.size(0)]) * 224
+        MAX = MAX.cuda()
+        MIN = torch.zeros([grad_output.size(0)])
+        MIN = MIN.cuda()
 
         x_max = torch.min(tmp_x + tmp_l, MAX)
         x_max = x_max.unsqueeze(-1)
@@ -64,30 +70,40 @@ class AttentionCropFunction(torch.autograd.Function):
         y_min = torch.max(tmp_y - tmp_l, MIN)
         y_min = y_min.unsqueeze(-1)
         y_min = y_min.unsqueeze(-1)
-        in_size = 224
 
+        in_size = 224
         ret = torch.Tensor(grad_output.size(0), 3).zero_()
         norm = -(grad_output * grad_output).sum(dim=1)
+        '''
+        x = torch.stack([torch.arange(0, in_size)] * in_size).t()
+        y = x.t()
+        long_size = (in_size/3*2)
+        short_size = (in_size/3)
+        mx = (x >= long_size).float() - (x < short_size).float()
+        my = (y >= long_size).float() - (y < short_size).float()
+        ml = (((x < short_size)+(x >= long_size)+(y < short_size)+(y >= long_size)) > 0).float()*2 - 1
+
+        mx_batch = torch.stack([mx.float()] * grad_output.size(0))
+        my_batch = torch.stack([my.float()] * grad_output.size(0))
+        ml_batch = torch.stack([ml.float()] * grad_output.size(0))
+        '''
         x = torch.stack([torch.arange(0, in_size)] * in_size).t()
         y = x.t()
         x = torch.stack([x] * grad_output.size(0))
         y = torch.stack([y] * grad_output.size(0))
 
-        long_size = (in_size/3*2)
-        short_size = (in_size/3)
+        x = x.cuda()
+        y = y.cuda()
+
         mx_batch = (x >= x_max).float() - (x < x_min).float()
         my_batch = (y >= y_max).float() - (y < y_min).float()
-        ml_batch = (((x < x_min)+(x >= x_max)+(y < y_min)+(y >= y_max)) > 0).float()*2 - 1
+        ml_batch = (((x < x_min) + (x >= x_max) + (y < y_min) + (y >= y_max)) > 0).float() * 2 - 1
 
-        #mx_batch = torch.stack([mx.float()] * grad_output.size(0))
-        #my_batch = torch.stack([my.float()] * grad_output.size(0))
-        #ml_batch = torch.stack([ml.float()] * grad_output.size(0))
-
-        if isinstance(grad_output, torch.FloatTensor):
-            mx_batch = mx_batch
-            my_batch = my_batch
-            ml_batch = ml_batch
-            ret = ret
+        if isinstance(grad_output, torch.cuda.FloatTensor):
+            mx_batch = mx_batch.cuda()
+            my_batch = my_batch.cuda()
+            ml_batch = ml_batch.cuda()
+            ret = ret.cuda()
 
         ret[:, 0] = (norm * mx_batch).sum(dim=1).sum(dim=1)
         ret[:, 1] = (norm * my_batch).sum(dim=1).sum(dim=1)
@@ -136,18 +152,20 @@ class RACNN(nn.Module):
     def forward(self, x):
         batch_size = x.shape[0]
         #rescale_tl = torch.tensor([1, 1, 0.5], requires_grad=False).cuda()
-        rescale_tl = torch.tensor([1, 1, 0.5], requires_grad=False)
+        #rescale_tl = torch.tensor([1, 1, 0.5], requires_grad=False).cuda()
         # forward @scale-1
         feature_s1 = self.b1.features[:-1](x)  # torch.Size([1, 320, 14, 14])
         pool_s1 = self.feature_pool(feature_s1)
         _attention_s1 = self.apn1(feature_s1.view(-1, 320 * 7 * 7))
-        attention_s1 = _attention_s1*rescale_tl
+        #attention_s1 = _attention_s1*rescale_tl
+        attention_s1 = _attention_s1
         resized_s1 = self.crop_resize(x, attention_s1 * x.shape[-1])
         # forward @scale-2
         feature_s2 = self.b2.features[:-1](resized_s1)  # torch.Size([1, 320, 7, 7])
         pool_s2 = self.feature_pool(feature_s2)
         _attention_s2 = self.apn2(feature_s2.view(-1, 320 * 7 * 7))
-        attention_s2 = _attention_s2*rescale_tl
+        #attention_s2 = _attention_s2*rescale_tl
+        attention_s2 = _attention_s2
         resized_s2 = self.crop_resize(resized_s1, attention_s2 * resized_s1.shape[-1])
         # forward @scale-3
         feature_s3 = self.b3.features[:-1](resized_s2)
@@ -161,7 +179,6 @@ class RACNN(nn.Module):
     def __get_weak_loc(self, features):
         ret = []   # search regions with the highest response value in conv5
         for i in range(len(features)):
-            #resize = 224 if i >= 1 else 448
             resize = 224
             response_map_batch = F.interpolate(features[i], size=[resize, resize], mode="bilinear").mean(1)  # mean alone channels
             ret_batch = []
@@ -175,61 +192,90 @@ class RACNN(nn.Module):
         return ret
 
     def __echo_pretrain_apn(self, inputs, optimizer):
-        inputs = Variable(inputs)
-        preds, features, attens, _ = self.forward(inputs)
+        inputs = Variable(inputs).cuda()
+        _, features, attens, _ = self.forward(inputs)
         weak_loc = self.__get_weak_loc(features)
         optimizer.zero_grad()
-        weak_loss1 = F.smooth_l1_loss(attens[0], weak_loc[0])
-        weak_loss2 = F.smooth_l1_loss(attens[1], weak_loc[1])
+        weak_loss1 = F.smooth_l1_loss(attens[0], weak_loc[0].cuda())
+        weak_loss2 = F.smooth_l1_loss(attens[1], weak_loc[1].cuda())
         loss = weak_loss1 + weak_loss2
         loss.backward()
         optimizer.step()
         return loss.item()
 
+    '''
+    @staticmethod
+    def multitask_loss(logits, targets):
+        loss = []
+        for i in range(len(logits)):
+            loss.append(F.binary_cross_entropy_with_logits(logits[i].squeeze(-1), targets.float()))
+            #loss.append(F.cross_entropy(logits[i], targets))
+        loss = torch.sum(torch.stack(loss))
+        return loss
+    '''
     @staticmethod
     def multitask_loss(logits, targets):
         loss = []
         for i in range(len(logits)):
             loss.append(F.binary_cross_entropy_with_logits(logits[i].squeeze(-1), targets.float()))
             # loss.append(F.cross_entropy(logits[i], targets))
-        loss = torch.sum(torch.stack(loss))
         return loss
-
-    '''@staticmethod
-    def rank_loss(logits, targets, margin=0.05):
-        preds = [torch.sigmoid(x) for x in logits] # preds length equal to 3
-        criterion1 = torch.nn.MarginRankingLoss(margin=0.05, reduction='sum')
-        criterion2 = torch.nn.MarginRankingLoss(margin=0.05, reduction='sum')
-        y = torch.tensor([-1]).cuda()
-        return criterion1(preds[0], preds[1], y) + criterion2(preds[1], preds[2], y)'''
 
     @staticmethod
     def rank_loss(logits, targets, margin=0.05):
         preds = [torch.sigmoid(x) for x in logits]
-        criterion1 = torch.nn.MarginRankingLoss(margin=0.05, reduction='sum')
-        criterion2 = torch.nn.MarginRankingLoss(margin=0.05, reduction='sum')
+        criterion1 = torch.nn.MarginRankingLoss(margin=margin, reduction='sum')
+        criterion2 = torch.nn.MarginRankingLoss(margin=margin, reduction='sum')
         targets = targets.unsqueeze(-1)
-        targets[targets==1] = -1
-        targets[targets==0] = 1
-        return criterion1(preds[0], preds[1], targets) + criterion2(preds[1], preds[2], targets)
+        targets[targets == 1] = -1
+        targets[targets == 0] = 1
+        return criterion1(preds[0], preds[1], targets), criterion2(preds[1], preds[2], targets)
 
     def __echo_backbone(self, inputs, targets, optimizer):
-        inputs, targets = Variable(inputs), Variable(targets)
+        inputs, targets = Variable(inputs).cuda(), Variable(targets).cuda()
         logits, _, _, _ = self.forward(inputs)
-        optimizer.zero_grad()
-        loss = self.multitask_loss(logits, targets)
-        loss.backward()
-        optimizer.step()
-        return loss.item()
+        optim1, optim2, optim3 = optimizer
+        loss1, loss2, loss3 = self.multitask_loss(logits, targets)
+
+        optim3.zero_grad()
+        loss3.backward(retain_graph=True)
+        optim3.step()
+
+        optim2.zero_grad()
+        loss2.backward(retain_graph=True)
+        optim2.step()
+
+        optim1.zero_grad()
+        loss1.backward()
+        optim1.step()
+
+        #optimizer.zero_grad()
+        #loss = self.multitask_loss(logits, targets)
+        #loss.backward()
+        #optimizer.step()
+        #return loss.item()
+        return loss1.item() + loss2.item() + loss3.item()
 
     def __echo_apn(self, inputs, targets, optimizer):
-        inputs, targets = Variable(inputs), Variable(targets)
+        inputs, targets = Variable(inputs).cuda(), Variable(targets).cuda()
         logits, _, _, _ = self.forward(inputs)
-        optimizer.zero_grad()
-        loss = self.rank_loss(logits, targets)
-        loss.backward()
-        optimizer.step()
-        return loss.item()
+        optim1, optim2 = optimizer
+        loss1, loss2 = self.rank_loss(logits, targets)
+
+        optim2.zero_grad()
+        loss2.backward(retain_graph=True)
+        optim2.step()
+
+        optim1.zero_grad()
+        loss1.backward()
+        optim1.step()
+
+        #optimizer.zero_grad()
+        #loss = self.rank_loss(logits, targets)
+        #loss.backward()
+        #optimizer.step()
+        #return loss.item()
+        return loss1.item() + loss2.item()
 
     def mode(self, mode_type):
         assert mode_type in ['pretrain_apn', 'apn', 'backbone']
@@ -245,7 +291,7 @@ class RACNN(nn.Module):
 
 
 if __name__ == "__main__":
-    net = RACNN(num_classes=1)
+    net = RACNN(num_classes=1).cuda()
     #net = RACNN(num_classes=8)
     net.mode('pretrain_apn')
     optimizer = torch.optim.SGD(list(net.apn1.parameters()) + list(net.apn2.parameters()), lr=0.001, momentum=0.9)

@@ -51,8 +51,8 @@ def run(pretrained_backbone=None):
     params = list(net.apn1.parameters()) + list(net.apn2.parameters())
     optimizer = optim.SGD(params, lr=0.001, momentum=0.9)
 
-    trainset = my_dataloader('/home/zhaolei2/project/xception/datasets/ff--c23', split='train')
-    testset = my_dataloader('/home/zhaolei2/project/xception/datasets/ff--c23', split='test')
+    trainset = my_dataloader('/home/zhaolei2/project/xception/datasets/ForgeryNet_split', split='train')
+    testset = my_dataloader('/home/zhaolei2/project/xception/datasets/ForgeryNet_split', split='test')
     trainloader = DataLoader(trainset, batch_size=8, shuffle=True, collate_fn=trainset.my_collate)
     testloader = DataLoader(testset, batch_size=8, shuffle=False, collate_fn=testset.my_collate)
     sample = random_sample(testloader)
@@ -76,7 +76,7 @@ def run(pretrained_backbone=None):
                 save_img(x2, path=f'build/.cache/step_{step}@4x.jpg', annotation=f'loss = {avg_loss:.7f}, step = {step}')
 
             if step >= 300:  # 128 steps is enough for pretraining
-                torch.save(net.state_dict(), f'build/racnn_pretrained.pt')
+                torch.save(net.state_dict(), f'build/racnn_pretrained_compare.pt')
                 return
 
 

@@ -13,11 +13,11 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import random
 sys.path.append('.')  # noqa: E402
-from model_cpu import RACNN
+from model_vis import RACNN
 from my_loader import my_dataloader
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
-import torchvision
+
 
 def log(msg):
     open('build/core.log', 'a').write(f'[{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}]\t'+msg+'\n'), print(msg)
@@ -39,17 +39,9 @@ def save_img(x, path, annotation=''):
 
 
 def run(pretrained_backbone=None):
-    net = RACNN(num_classes=1)
+    net = RACNN(num_classes=1).cuda()
     if pretrained_backbone:  # Using pretrained backbone for apn pretraining
-        state_dict = torchvision.models.mobilenet_v2(pretrained=False)
-        state_dict.load_state_dict(torch.load('mobilenet_v2-b0353104.pth'))
-        state_dict = state_dict.state_dict()
-        state_dict.pop('classifier.1.weight')
-        state_dict.pop('classifier.1.bias')
-        net2 = torchvision.models.mobilenet_v2(num_classes=1)
-        state_dict['classifier.1.weight'] = net2.state_dict()['classifier.1.weight']
-        state_dict['classifier.1.bias'] = net2.state_dict()['classifier.1.bias']
-
+        state_dict = torch.load(pretrained_backbone).state_dict()
         net.b1.load_state_dict(state_dict)
         net.b2.load_state_dict(state_dict)
         net.b3.load_state_dict(state_dict)
@@ -59,20 +51,19 @@ def run(pretrained_backbone=None):
     params = list(net.apn1.parameters()) + list(net.apn2.parameters())
     optimizer = optim.SGD(params, lr=0.001, momentum=0.9)
 
-    trainset = my_dataloader('G:\deepfakes\ForgeryNet\\ForgeryNet_split', split='train')
-    testset = my_dataloader('G:\deepfakes\ForgeryNet\\ForgeryNet_split', split='test')
+    trainset = my_dataloader('/home/zhaolei2/project/xception/datasets/ForgeryNet_split', split='train')
+    testset = my_dataloader('/home/zhaolei2/project/xception/datasets/ForgeryNet_split', split='test')
     trainloader = DataLoader(trainset, batch_size=8, shuffle=True, collate_fn=trainset.my_collate)
     testloader = DataLoader(testset, batch_size=8, shuffle=False, collate_fn=testset.my_collate)
     sample = random_sample(testloader)
-    sample = Variable(sample)
-    #net.mode("pretrain_apn")
-    net.mode("apn")
+    sample = Variable(sample).cuda()
+    net.mode("pretrain_apn")
 
     def avg(x): return sum(x)/len(x)
     for epoch in range(1):
         losses = []
-        for step, (inputs, targets) in enumerate(trainloader, 0):
-            loss = net.echo(inputs,targets,  optimizer)
+        for step, (inputs, _) in enumerate(trainloader, 0):
+            loss = net.echo(inputs, optimizer)
             losses.append(loss)
             avg_loss = avg(losses[-5 if len(losses) > 5 else -len(losses):])
             print(f':: loss @step{step:2d}: {loss}\tavg_loss_5: {avg_loss}')
@@ -84,8 +75,8 @@ def run(pretrained_backbone=None):
                 save_img(x1, path=f'build/.cache/step_{step}@2x.jpg', annotation=f'loss = {avg_loss:.7f}, step = {step}')
                 save_img(x2, path=f'build/.cache/step_{step}@4x.jpg', annotation=f'loss = {avg_loss:.7f}, step = {step}')
 
-            if step >= 30:  # 128 steps is enough for pretraining
-                torch.save(net.state_dict(), f'build/racnn_pretrained.pt')
+            if step >= 300:  # 128 steps is enough for pretraining
+                torch.save(net.state_dict(), f'build/racnn_pretrained_compare.pt')
                 return
 
 
@@ -105,8 +96,8 @@ def clean(path='build/.cache/'):
 
 
 if __name__ == "__main__":
-    #os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     clean()
-    run(pretrained_backbone='mobilenet_v2-b0353104.pth')
-    build_gif(pattern='@2x', gif_name='pretrain_apn_cub200')
-    build_gif(pattern='@4x', gif_name='pretrain_apn_cub200')
+    run(pretrained_backbone='/home/zhaolei2/project/xception/paper/build/mobilenet_v2_compare.pt')
+    build_gif(pattern='@2x', gif_name='pretrain_apn_ffc23_vis')
+    build_gif(pattern='@4x', gif_name='pretrain_apn_ffc23_vis')

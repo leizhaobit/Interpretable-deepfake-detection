@@ -64,15 +64,15 @@ def run():
     criterion = torch.nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(params=net.parameters(), lr=0.001)
 
-    trainset = my_dataloader('/home/zhaolei2/project/xception/datasets/ff--c23', split='train')
-    testset = my_dataloader('/home/zhaolei2/project/xception/datasets/ff--c23', split='test')
+    trainset = my_dataloader('/home/zhaolei2/project/xception/datasets/ForgeryNet_split', split='train')
+    testset = my_dataloader('/home/zhaolei2/project/xception/datasets/ForgeryNet_split', split='test')
     trainloader = DataLoader(trainset, batch_size=8, shuffle=True, collate_fn=trainset.my_collate)
     testloader = DataLoader(testset, batch_size=8, shuffle=False, collate_fn=testset.my_collate)
 
     log(' :: Start training ...')
     benchmark = 100
     avg_loss = 100
-    for epoch in range(100):
+    for epoch in range(40):
         losses = 0
         for step, (inputs, labels) in enumerate(trainloader):
             inputs, labels = Variable(inputs).cuda(), Variable(labels.float()).cuda()
@@ -93,8 +93,8 @@ def run():
         if avg_loss < benchmark:
             benchmark = avg_loss
             # stamp = f'e{epoch}{int(time.time())}'
-            log(f'avg_loss: {avg_loss}, save model as build/mobilenet_v2_ff.pt')
-            torch.save(net, f'build/mobilenet_v2_ff.pt')
+            log(f'avg_loss: {avg_loss}, save model as build/mobilenet_v2_compare.pt')
+            torch.save(net, f'build/mobilenet_v2_compare.pt')
             torch.save(optimizer.state_dict, f'build/optimizer.pt')
 
 

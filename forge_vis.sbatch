@@ -10,4 +10,4 @@ module load nvidia/cuda/10.2
 
 cd $SLURM_SUBMIT_DIR
 
-python pretrain_apn.py
+python forge-vis.py

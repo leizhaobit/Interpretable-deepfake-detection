@@ -1,25 +1,32 @@
+import shutil
+import cv2
+import imageio
 import os
-from torch import nn, optim
-import torch.backends.cudnn as cudnn
+import numpy as np
+import sys
 import torch
+import time
+import torch.optim as optim
+import torch.backends.cudnn as cudnn
 import torch.nn.functional as F
+#import seaborn as sns
+import matplotlib.pyplot as plt
+import random
+sys.path.append('.')  # noqa: E402
 from model_cpu import RACNN
-#from plant_loader import get_plant_loader
-from pretrain_apn import clean, log
+from my_loader import my_dataloader
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
-#from CUB_loader import CUB200_loader
-from my_loader import my_dataloader
-import warnings
-warnings.filterwarnings('ignore')
-num_classes = 1
 
-inp1 = torch.randn([8,2])
-print(inp1.shape)
-fla = nn.Flatten()
-dense = nn.Linear(num_classes*2, num_classes)
-acvi = nn.Sigmoid()
-x = fla(inp1)
-x = dense(x)
-out1 = acvi(x)
-print(out1.shape)
+
+in_size = 6
+x = torch.stack([torch.arange(0, in_size)] * in_size).t()
+x = torch.stack([x] * 2)
+MAX = torch.ones([2, 1, 1]) * 3
+mx = (x >= MAX).float()
+
+a = torch.ones([8])
+print(a.shape)
+a = a.unsqueeze(-1)
+print(a.shape)
+print('done')
